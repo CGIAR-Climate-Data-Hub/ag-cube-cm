@@ -136,6 +136,31 @@ def test_xfile_golden(prepared_model, request):
     assert_matches_golden("EXPS0001.MZX", xfiles[0].read_text(), request)
 
 
+def test_xfile_smodel_column(prepared_model):
+    """SMODEL must start at the column its own header announces.
+
+    DSSAT reads this field by fixed column, not by whitespace. One character of
+    drift makes it read MZCER as "ZCER" or CRGRO as "RGRO", and every run dies
+    with "Crop code incompatible with model specified" (rc=99) — an error that
+    names the crop, never the column, and so reads like a cultivar problem.
+
+    A byte-equal golden alone did not catch this: the golden was generated from
+    the buggy writer and froze the defect in place. This asserts the invariant
+    instead of the bytes, so regenerating the golden cannot reintroduce it.
+    """
+    content = next(prepared_model.working_dir.glob("*.MZX")).read_text()
+    lines = content.splitlines()
+    i = next(i for i, l in enumerate(lines) if l.startswith("@N GENERAL"))
+    header, data = lines[i], lines[i + 1]
+    col = header.index("SMODEL")
+    assert data[col:].split(), f"SMODEL column {col} is blank in {data!r}"
+    model = data[col:].split()[0]
+    assert model in {"MZCER", "MLCER", "RICER", "SGCER", "CSCER", "CRGRO",
+                     "BSCER", "SCCAN", "PTSUB", "CSYCA", "WHAPS"}, (
+        f"SMODEL reads {model!r} at column {col} — truncated or misaligned. "
+        f"line: {data!r}")
+
+
 def test_xfile_sections_present(prepared_model):
     """All sections DSSAT requires must be emitted."""
     content = next(prepared_model.working_dir.glob("*.MZX")).read_text()

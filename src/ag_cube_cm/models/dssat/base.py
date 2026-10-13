@@ -444,7 +444,14 @@ class DSSATModel(CropModel):
 
             f.write("*SIMULATION CONTROLS\n")
             f.write("@N GENERAL     NYERS NREPS START SDATE RSEED SNAME.................... SMODEL\n")
-            f.write(f" 1 GE             {nyers:2d}     1     S {sdate}  2150 DEFAULT                  {crop_module}\n")
+            # SNAME is a fixed 25-char field (cols 45-69), then ONE separator space,
+            # then SMODEL at col 71 — the column the header announces and the column
+            # DSSAT reads. Padding DEFAULT by hand previously left SMODEL at col 70,
+            # so DSSAT read the model code one character in: CRGRO -> "RGRO 048",
+            # MZCER -> "ZCER 048", and rejected every run with
+            # "Crop code incompatible with model specified" (rc=99).
+            f.write(f" 1 GE             {nyers:2d}     1     S {sdate}  2150 "
+                    f"{'DEFAULT':<25} {crop_module}\n")
             f.write("@N OPTIONS     WATER NITRO SYMBI PHOSP POTAS DISES  CHEM  TILL   CO2\n")
             f.write(" 1 OP              Y     Y     Y     N     N     N     N     Y     M\n")
             f.write("@N METHODS     WTHER INCON LIGHT EVAPO INFIL PHOTO HYDRO NSWIT MESOM MESEV MESOL\n")
@@ -694,8 +701,14 @@ class DSSATModel(CropModel):
             # threads that are in the middle of running DSSAT subprocesses
             # against the same shared <temp>/DSSAT048/ tree, and a vanished
             # DATA.CDE / DETAIL.CDE / MODEL.ERR / OUTPUT.CDE / SIMULATION.CDE
-            # at the wrong moment makes DSSAT exit rc=99 with the misleading
-            # "Crop code incompatible / Model: ZCER 048" error.
+            # at the wrong moment makes DSSAT exit rc=99.
+            #
+            # NOTE: the "Crop code incompatible / Model: ZCER 048" symptom once
+            # attributed to this race had a second, unrelated cause — the X-file
+            # wrote SMODEL at column 70 instead of 71, so DSSAT read the code one
+            # character in (MZCER -> "ZCER", CRGRO -> "RGRO"). That is fixed in
+            # _write_experiment_file above. A truncated model code in the error
+            # means the column, not the symlink.
             #
             # _bootstrap_dssat_home does the same job (copy static into
             # <temp>/DSSAT048/), guarded by self._bootstrap_lock so concurrent

@@ -48,7 +48,7 @@ CGIAR
 
 *SIMULATION CONTROLS
 @N GENERAL     NYERS NREPS START SDATE RSEED SNAME.................... SMODEL
- 1 GE              2     1     S 20092  2150 DEFAULT                  MZCER
+ 1 GE              2     1     S 20092  2150 DEFAULT                   MZCER
 @N OPTIONS     WATER NITRO SYMBI PHOSP POTAS DISES  CHEM  TILL   CO2
  1 OP              Y     Y     Y     N     N     N     N     Y     M
 @N METHODS     WTHER INCON LIGHT EVAPO INFIL PHOTO HYDRO NSWIT MESOM MESEV MESOL
