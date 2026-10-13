@@ -30,6 +30,7 @@ __license__: str = "MIT"
 _LAZY_IMPORTS: dict[str, str] = {
     "SpatialData": "ag_cube_cm.spatial.data",
     "SpatialCM": "ag_cube_cm.spatial.spatial_cm",
+    "SimulationResult": "ag_cube_cm.spatial.spatial_cm",
     "SimulationConfig": "ag_cube_cm.config.schemas",
     "load_config": "ag_cube_cm.config.loader",
 }
@@ -51,6 +52,7 @@ __all__: list[str] = [
     "__version__",
     "SpatialData",
     "SpatialCM",
+    "SimulationResult",
     "SimulationConfig",
     "load_config",
 ]

@@ -15,15 +15,28 @@ import pandas as pd
 import xarray as xr
 
 from ag_cube_cm.config.schemas import SimulationConfig
+from ag_cube_cm.models._fileops import rmtree_retry
 
 
 class CropModel(abc.ABC):
     """
     Abstract Base Class for all crop models (DSSAT, CAF2021, SIMPLE).
     
-    This class defines the mandatory interface that the Spatial Orchestrator 
+    This class defines the mandatory interface that the Spatial Orchestrator
     uses to run simulations across pixels.
     """
+
+    #: Key in :meth:`collect_outputs`' return dict holding the primary result
+    #: that :class:`~ag_cube_cm.spatial.spatial_cm.SpatialCM` grids into the
+    #: output cube.  DSSAT reports grain yield at maturity as ``HWAM``; other
+    #: models override this with their own headline variable.
+    YIELD_VARIABLE: str = "HWAM"
+
+    #: Units of :attr:`YIELD_VARIABLE`, written to the output cube.
+    YIELD_UNITS: str = "kg/ha"
+
+    #: Long name of :attr:`YIELD_VARIABLE`, written to the output cube.
+    YIELD_LONG_NAME: str = "Mean grain yield at maturity"
 
     def __init__(self, config: SimulationConfig) -> None:
         self.config = config
@@ -45,9 +58,15 @@ class CropModel(abc.ABC):
         return self.working_dir
 
     def cleanup_working_directory(self) -> None:
-        """Remove the isolated working directory and all its contents."""
+        """Remove the isolated working directory and all its contents.
+
+        Uses a retrying remove: on Windows the model binary may still hold a
+        handle for a moment after the subprocess returns, and DSSAT writes some
+        outputs read-only. Never raises — a directory left on disk is a
+        disk-space problem, not a reason to fail a good simulation.
+        """
         if self.working_dir and self.working_dir.exists():
-            shutil.rmtree(self.working_dir, ignore_errors=True)
+            rmtree_retry(self.working_dir)
             self.working_dir = None
 
     @abc.abstractmethod

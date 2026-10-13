@@ -114,14 +114,26 @@ MANAGEMENT:
 ### Step 3 — Run the simulation
 
 ```python
+from ag_cube_cm import SpatialCM, load_config
+
+with SpatialCM(load_config("dssat_maize_hnd.yaml")) as cm:
+    result = cm.run()            # feature=..., max_pixels=... to narrow the run
+
+print(f"Mean yield : {result.mean_yield} kg/ha")
+print(f"Pixels OK  : {result.pixels_ok}")
+print(f"Output     : {result.output_path}")
+result.cube                      # the in-memory yield datacube
+```
+
+`SpatialCM` is the single orchestrator; the CLI and the MCP server are thin
+wrappers over it. From an MCP client the same run is:
+
+```python
 from ag_cube_cm.mcp_server import run_simulation
 import json
 
 result = json.loads(run_simulation(config_path="dssat_maize_hnd.yaml"))
-
-print(f"Mean yield : {result['mean_hwam_kg_ha']} kg/ha")
-print(f"Pixels OK  : {result['pixels_ok']}")
-print(f"Output     : {result['output_path']}")
+print(result["mean_hwam_kg_ha"], result["pixels_ok"])
 ```
 
 Or run all three steps end-to-end with the bundled example script:
@@ -140,7 +152,7 @@ The output NetCDF (`yield_<suffix>.nc`) has four dimensions:
 Dimensions : planting_window × year × y × x
 Variables  :
   HWAM (kg/ha)  — grain yield at maturity
-  flag          — 0 = ok, 1 = skipped (no data), 2 = model error
+  flag          — 0 = ok, 1 = model error, 2 = skipped (no data)
 ```
 
 Typical post-processing:
@@ -275,14 +287,19 @@ src/ag_cube_cm/
 │   ├── banana_n/      Pure-Python banana growth + nitrogen model
 │   └── caf2021/       Coffee-shade agroforestry model
 ├── spatial/
-│   ├── data.py        SpatialData — lazy dask-backed NetCDF loader
+│   ├── spatial_cm.py  SpatialCM — THE orchestrator: pixel × window × season sweep,
+│   │                  parallel execution, result assembly. Returns SimulationResult.
+│   ├── data.py        SpatialData — the single file-open path for cubes
 │   ├── raster_ops.py  clip_to_bbox, mask_with_geometry, get_roi_data
-│   ├── spatial_cm.py  SpatialCM — parallel pixel orchestrator (ThreadPool / ProcessPool)
-│   └── reporter.py    SpatialReporter — NetCDF / Parquet output writer
+│   └── reporter.py    SpatialReporter — grid assembly + NetCDF / Parquet writer
 ├── transform/
 │   └── soil_cube.py   SoilDataCubeBuilder — stacks SoilGrids GeoTIFFs into depth×y×x NetCDF
-└── mcp_server.py      FastMCP server (4 tools for AI-assisted workflows)
+├── cli.py             `ag-cube-cm run` — calls SpatialCM directly
+└── mcp_server.py      FastMCP server (4 tools) — thin JSON wrapper over SpatialCM
 ```
+
+Both front ends delegate to `SpatialCM`, so orchestration behaviour cannot
+drift between the CLI and the MCP server.
 
 ---
 

@@ -20,7 +20,9 @@ import pandas as pd
 import xarray as xr
 from pyproj import Transformer
 
+from ag_cube_cm.models._fileops import copy_retry
 from ag_cube_cm.models.base import CropModel
+from ag_cube_cm.models.dssat import soil as dssat_soil
 from ag_cube_cm.models.factory import register_model
 
 logger = logging.getLogger(__name__)
@@ -250,40 +252,93 @@ class DSSATModel(CropModel):
         """
         file_path = self.working_dir / "TR.SOL"
         country = getattr(self.config.GENERAL_INFO, 'country', 'USA')
-        # Default bulk averages for top properties
-        salb, slu1, sldr = 0.13, 1.0, 0.25
+
+        # --- rescale every layer from raw SoilGrids units to DSSAT units ---
+        layers: list[dict] = []
+        for _, row in df_sol.iterrows():
+            depth = row.get('depth', -99)
+            if isinstance(depth, str):
+                depth = int(depth.split('-')[1]) if '-' in depth else int(depth)
+            else:
+                depth = int(depth)
+
+            # SoilGrids v2 scale factors → DSSAT units
+            layers.append({
+                'depth': depth,
+                'slll': row.get('wv1500', -99.0) / 1000,  # 10^-3 cm3/cm3 → cm3/cm3
+                'sdul': row.get('wv0033', -99.0) / 1000,
+                'ssat': row.get('wv0010', -99.0) / 1000,
+                'sbdm': row.get('bdod',   -99.0) / 100,   # cg/cm3 → g/cm3
+                'sloc': row.get('soc',    -99.0) / 100,   # dg/kg → %
+                'slcl': row.get('clay',   -99.0) / 10,    # g/kg → %
+                'slsi': row.get('silt',   -99.0) / 10,    # g/kg → %
+                'slcf': row.get('cfvo',   -99.0) / 10,    # cm3/dm3 × 10 → %
+                'slhw': row.get('phh2o',  -99.0) / 10,    # pH × 10 → pH
+                # SoilGrids nitrogen is cg/kg: /100 → g/kg, /10 again → %.
+                'slni': row.get('nitrogen', -99.0) / 1000
+                        if 'nitrogen' in row else -99.0,
+            })
+
+        if not layers:
+            raise ValueError("Soil slice produced no layers; cannot write TR.SOL")
+
+        depths = [lyr['depth'] for lyr in layers]
+        # Sand is not written to the .SOL but is needed for every texture-derived
+        # property below; SoilGrids gives clay and silt, so derive it.
+        for lyr in layers:
+            lyr['sand'] = max(0.0, 100.0 - lyr['slcl'] - lyr['slsi'])
+
+        # --- profile-level properties, derived from the topsoil ---
+        top = layers[0]
+        profile_texture = dssat_soil.dssat_texture_code(top['sand'], top['slcl'])
+        texture_name = dssat_soil.texture_class(top['sand'], top['slcl'])
+        salb = dssat_soil.albedo(top['sloc'])
+        slu1 = dssat_soil.stage1_evaporation_limit(top['slcl'], top['sand'])
+        sldr = dssat_soil.drainage_rate(top['sand'], top['slcl'])
+        slro = dssat_soil.runoff_curve_number(top['sand'], top['slcl'])
+        total_depth = max(depths)
+        srgf_values = dssat_soil.root_growth_factors(depths)
+
+        logger.debug(
+            "[Pixel %s] Soil: %s | SALB=%.3f SLU1=%.2f SLDR=%.2f SLRO=%.1f depth=%dcm",
+            self.pixel_id, texture_name, salb, slu1, sldr, slro, total_depth,
+        )
+
         with open(file_path, "w") as f:
             f.write("*SOILS: EXPS\n\n")
-            f.write("*TRAN0001  UNCLASSIFIED             SCL       100\n")
+            # DSSAT parses this line by column position (IPSOIL), so the field
+            # widths below are not cosmetic: source occupies columns 11-35,
+            # the texture code 36-40, and the depth is right-aligned to 48.
+            # The texture name goes after the depth, where DSSAT treats the
+            # remainder of the line as free-text description.
+            f.write(
+                f"*TRAN0001  {'SoilGrids':<25}{profile_texture:<5}"
+                f"{total_depth:>8} {texture_name.upper()}\n"
+            )
             f.write("@SITE        COUNTRY          LAT     LONG SCS FAMILY\n")
             f.write(f" EXPS        {country[:10]:<10}  {lat:8.3f} {lon:8.3f}\n")
             f.write("@ SCOM  SALB  SLU1  SLDR  SLRO  SLNF  SLPF  SMHB  SMPX  SMKE\n")
-            f.write(f"   -99 {salb:5.2f} {slu1:5.1f} {sldr:5.2f}  73.0  1.00  1.00 -99.0 -99.0 -99.0\n")
+            f.write(
+                f"   -99 {salb:5.2f} {slu1:5.1f} {sldr:5.2f} {slro:5.1f}"
+                f"  1.00  1.00 -99.0 -99.0 -99.0\n"
+            )
             f.write("@  SLB  SLMH  SLLL  SDUL  SSAT  SRGF  SSKS  SBDM  SLOC  SLCL  SLSI  SLCF  SLNI  SLHW  SLHB  SCEC  SADC\n")
-            # Write layers, storing (depth, slll, sdul) for use in IC section of MZX
+
+            # Keep (depth, slll, sdul) for the initial-conditions block of the X-file.
             self._soil_layers = []
-            for _, row in df_sol.iterrows():
-                depth = row.get('depth', -99)
-                if isinstance(depth, str) and '-' in depth:
-                    depth = int(depth.split('-')[1])
-                elif isinstance(depth, str):
-                    depth = int(depth)
-                else:
-                    depth = int(depth)
-
-                # SoilGrids v2 scale factors → DSSAT units
-                slll = row.get('wv1500', -99.0) / 1000  # 10^-3 cm³/cm³ → cm³/cm³
-                sdul = row.get('wv0033', -99.0) / 1000
-                ssat = row.get('wv0010', -99.0) / 1000
-                sbdm = row.get('bdod',   -99.0) / 100   # cg/cm³ → g/cm³
-                sloc = row.get('soc',    -99.0) / 100   # dg/kg → %
-                slcl = row.get('clay',   -99.0) / 10    # g/kg → %
-                slsi = row.get('silt',   -99.0) / 10    # g/kg → %
-                slcf = row.get('cfvo',   -99.0) / 10    # cm³/dm³ × 10 → %
-                slhw = row.get('phh2o',  -99.0) / 10    # pH × 10 → pH
-
-                self._soil_layers.append((depth, slll, sdul))
-                f.write(f"{depth:6d}   -99 {slll:5.3f} {sdul:5.3f} {ssat:5.3f} 1.000 -99.0 {sbdm:5.2f} {sloc:5.2f} {slcl:5.1f} {slsi:5.1f} {slcf:5.1f} -99.0 -99.0 {slhw:5.2f} -99.0 -99.0 -99.0\n")
+            self._soil_layer_detail = layers
+            for lyr, srgf in zip(layers, srgf_values):
+                ssks = dssat_soil.saturated_conductivity(
+                    lyr['ssat'], lyr['sdul'], lyr['slll']
+                )
+                self._soil_layers.append((lyr['depth'], lyr['slll'], lyr['sdul']))
+                f.write(
+                    f"{lyr['depth']:6d}   -99 {lyr['slll']:5.3f} {lyr['sdul']:5.3f} "
+                    f"{lyr['ssat']:5.3f} {srgf:5.3f} {ssks:5.2f} {lyr['sbdm']:5.2f} "
+                    f"{lyr['sloc']:5.2f} {lyr['slcl']:5.1f} {lyr['slsi']:5.1f} "
+                    f"{lyr['slcf']:5.1f} {lyr['slni']:5.3f} {lyr['slhw']:5.2f} "
+                    f"-99.0 -99.0 -99.0\n"
+                )
 
     def _write_mzx(self, lat: float, lon: float) -> None:
         """
@@ -346,10 +401,17 @@ class DSSATModel(CropModel):
             f.write("@C  ICBL  SH2O  SNH4  SNO3\n")
             # Derive SH2O from actual soil layers: slll + 80% of plant-available water
             if self._soil_layers:
-                for (depth, slll, sdul) in self._soil_layers:
+                depths = [d for (d, _, _) in self._soil_layers]
+                detail = getattr(self, '_soil_layer_detail', None) or []
+                total_n = [lyr.get('slni', -99.0) for lyr in detail] or None
+                if total_n and not all(n > 0 for n in total_n):
+                    total_n = None  # nitrogen layer absent or unusable
+                mineral_n = dssat_soil.initial_mineral_nitrogen(depths, total_n)
+
+                for (depth, slll, sdul), (nh4, no3) in zip(self._soil_layers, mineral_n):
                     sh2o = slll + 0.8 * max(sdul - slll, 0.0)
                     sh2o = max(sh2o, slll + 0.05)  # ensure above wilting point
-                    f.write(f" 1 {depth:5d} {sh2o:5.3f}  0.60  3.00\n")
+                    f.write(f" 1 {depth:5d} {sh2o:5.3f} {nh4:5.2f} {no3:5.2f}\n")
             else:
                 f.write(" 1    20 0.250  0.60  3.00\n")
                 f.write(" 1    60 0.250  0.60  3.00\n")
@@ -498,7 +560,7 @@ class DSSATModel(CropModel):
         for ext in ("CUL", "ECO", "SPE"):
             src = genotype_dir / f"{prefix}{self._DSSAT_VERSION}.{ext}"
             if src.exists():
-                shutil.copy2(str(src), str(self.working_dir / src.name))
+                copy_retry(src, self.working_dir / src.name)
             else:
                 logger.warning("Genotype file not found: %s", src)
 
@@ -563,13 +625,26 @@ class DSSATModel(CropModel):
                 if item.is_dir():
                     if not dest.exists():
                         shutil.copytree(str(item), str(dest))
-                else:
-                    try:
-                        if dest.exists():
-                            dest.unlink()
-                        shutil.copy2(str(item), str(dest))
-                    except OSError:
-                        pass  # another thread already wrote it; skip
+                    continue
+
+                # Only write a file that is missing or stale. Unconditionally
+                # unlinking and recopying — as this previously did — reopens a
+                # race on every call: a sibling thread staging DATA.CDE /
+                # MODEL.ERR / the binary out of this shared tree can land in the
+                # window between the unlink and the copy and lose its pixel to a
+                # PermissionError. Once the tree is populated this loop now
+                # touches nothing, so the window closes entirely.
+                if dest.exists() and dest.stat().st_size == item.stat().st_size:
+                    continue
+                try:
+                    copy_retry(item, dest)
+                except OSError:
+                    # A sibling thread is writing the same file; its copy is as
+                    # good as ours and the size check above will accept it.
+                    logger.debug(
+                        "Bootstrap: %s is being written by another thread, skipping",
+                        item.name,
+                    )
 
         is_windows = platform.system().lower() == "windows"
         exe_name = "dscsm048.exe" if is_windows else "dscsm048"
@@ -641,7 +716,8 @@ class DSSATModel(CropModel):
         for fname in ["DATA.CDE", "DETAIL.CDE", "MODEL.ERR", "OUTPUT.CDE", "SIMULATION.CDE"]:
             src_file = dssat_home / fname
             if src_file.exists():
-                shutil.copy2(str(src_file), str(self.working_dir / fname))
+                # Reads the shared bootstrap tree, so retry past transient locks.
+                copy_retry(src_file, self.working_dir / fname)
 
         # Use C mode (direct execution): dscsm048 C EXPS0001.MZX 1
         # This avoids the DSSBatch.v48 71-char padded-path bug in DSSAT 4.8.

@@ -40,7 +40,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _open_dataset(filepath: str, engine: str = "netcdf4") -> xr.Dataset:
+def _open_dataset(
+    filepath: str,
+    engine: str = "netcdf4",
+    chunks: str | dict | None = "auto",
+) -> xr.Dataset:
     """Open a raster or NetCDF file as a **lazy Dask-backed** dataset.
 
     This is the single canonical place where files are opened.  It enforces
@@ -62,6 +66,12 @@ def _open_dataset(filepath: str, engine: str = "netcdf4") -> xr.Dataset:
     engine : str
         NetCDF engine passed to :func:`xarray.open_dataset`.  Default:
         ``"netcdf4"``.  Use ``"h5netcdf"`` if netCDF4 is unavailable.
+    chunks : str | dict | None
+        Dask chunking.  ``"auto"`` (default) keeps the lazy memory contract.
+        Pass ``None`` for a plain, un-chunked open — :class:`SpatialCM` does
+        this because its pixel loop issues hundreds of thousands of tiny
+        ``.sel()`` calls from a thread pool, where the Dask scheduler costs
+        far more than it saves.
 
     Returns
     -------
@@ -94,8 +104,8 @@ def _open_dataset(filepath: str, engine: str = "netcdf4") -> xr.Dataset:
     if suffix == ".nc":
         # True lazy open — returns a Dask-backed Dataset.
         # chunks='auto' → Dask picks sizes; no data is read from disk.
-        logger.debug("Opening NetCDF (lazy): %s", filepath)
-        return xr.open_dataset(str(path), engine=engine, chunks="auto")
+        logger.debug("Opening NetCDF (chunks=%r): %s", chunks, filepath)
+        return xr.open_dataset(str(path), engine=engine, chunks=chunks)
 
     if suffix in {".tif", ".tiff"}:
         try:
@@ -230,11 +240,18 @@ class SpatialData:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def open(filepath: str, engine: str = "netcdf4") -> xr.Dataset:
+    def open(
+        filepath: str,
+        engine: str = "netcdf4",
+        chunks: str | dict | None = "auto",
+    ) -> xr.Dataset:
         """Thin public alias for :func:`_open_dataset`.
 
-        Use this when you need a one-off lazy open outside of a full
-        :class:`SpatialData` instance.
+        Use this when you need a one-off open outside of a full
+        :class:`SpatialData` instance.  This is the single supported entry
+        point for reading a cube from disk — go through it rather than
+        calling :func:`xarray.open_dataset` directly, so format support stays
+        in one place.
 
         Parameters
         ----------
@@ -242,13 +259,15 @@ class SpatialData:
             Path to the dataset file.
         engine : str
             NetCDF engine.  Default: ``"netcdf4"``.
+        chunks : str | dict | None
+            Dask chunking; ``None`` for an un-chunked open.
 
         Returns
         -------
         xr.Dataset
-            Lazy Dask-backed dataset.
+            Dataset, Dask-backed unless ``chunks=None``.
         """
-        return _open_dataset(filepath, engine)
+        return _open_dataset(filepath, engine, chunks)
 
     def close(self) -> None:
         """Release all open file handles and clear cached datasets.

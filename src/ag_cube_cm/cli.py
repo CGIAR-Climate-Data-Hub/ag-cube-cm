@@ -336,9 +336,13 @@ def load_run_config(path: str | Path) -> WithCubesConfig | FullPipelineConfig:
 # ---------------------------------------------------------------------------
 
 def _run_with_cubes(cfg: WithCubesConfig, dry_run: bool = False) -> dict:
-    """Execute mode: with_cubes."""
-    from ag_cube_cm.mcp_server import run_simulation
+    """Execute mode: with_cubes.
 
+    Builds a ``SimulationConfig`` YAML from the CLI's own schema, then hands
+    it to :class:`~ag_cube_cm.spatial.spatial_cm.SpatialCM` — the same
+    orchestrator the MCP server wraps, called directly so there is no JSON
+    round-trip through the MCP layer.
+    """
     sim = cfg.simulation
     mgmt = cfg.management
 
@@ -384,20 +388,24 @@ def _run_with_cubes(cfg: WithCubesConfig, dry_run: bool = False) -> dict:
         yaml.dump(sim_yaml, fh, default_flow_style=False, sort_keys=False)
 
     if dry_run:
-        click.echo(f"[dry-run] Would call run_simulation(config_path={tmp_cfg}, "
+        click.echo(f"[dry-run] Would run SpatialCM(config_path={tmp_cfg}, "
                    f"max_pixels={sim.max_pixels}, feature={sim.feature!r})")
         return {"status": "dry_run"}
 
-    result = json.loads(
-        run_simulation(
-            config_path=str(tmp_cfg),
-            max_pixels=sim.max_pixels,
-            feature=sim.feature,
-            adm_level=sim.adm_level,
-        )
-    )
-    tmp_cfg.unlink(missing_ok=True)
-    return result
+    from ag_cube_cm.config.loader import load_config
+    from ag_cube_cm.spatial.spatial_cm import SpatialCM
+
+    try:
+        with SpatialCM(load_config(str(tmp_cfg))) as cm:
+            result = cm.run(
+                feature=sim.feature,
+                adm_level=sim.adm_level,
+                max_pixels=sim.max_pixels,
+            )
+        payload = {"status": "ok", **result.summary()}
+    finally:
+        tmp_cfg.unlink(missing_ok=True)
+    return payload
 
 
 def _run_full_pipeline(cfg: FullPipelineConfig, dry_run: bool = False) -> dict:
