@@ -42,6 +42,7 @@ tmp_options/
 # ---- Data & outputs (not part of the package) ------------------------------
 weather/
 data_test/
+tests/
 tmp*/
 output_*.nc
 dssat_err.txt
@@ -72,4 +73,3 @@ desktop.ini
 .env.*
 *.pem
 *.key
-
