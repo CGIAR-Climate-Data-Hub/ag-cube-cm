@@ -56,6 +56,7 @@ def _open_dataset(
     Supported extensions
     --------------------
     * ``.nc``    → :func:`xarray.open_dataset` with ``chunks='auto'``
+    * ``.zarr``  → :func:`xarray.open_zarr`, CF-decoded (see :func:`_open_zarr`)
     * ``.tif``   → :func:`rioxarray.open_rasterio` with ``chunks='auto'``
     * ``.pickle`` → standard pickle (not lazy — small metadata objects only)
 
@@ -107,6 +108,9 @@ def _open_dataset(
         logger.debug("Opening NetCDF (chunks=%r): %s", chunks, filepath)
         return xr.open_dataset(str(path), engine=engine, chunks=chunks)
 
+    if suffix == ".zarr":
+        return _open_zarr(path, chunks)
+
     if suffix in {".tif", ".tiff"}:
         try:
             import rioxarray  # noqa: F401 — registers .rio accessor
@@ -133,8 +137,59 @@ def _open_dataset(
 
     raise ValueError(
         f"Unsupported file extension '{suffix}'. "
-        "Supported: .nc, .tif, .tiff, .pkl, .pickle"
+        "Supported: .nc, .zarr, .tif, .tiff, .pkl, .pickle"
     )
+
+
+def _open_zarr(path: Path, chunks: str | dict | None) -> xr.Dataset:
+    """Open a Zarr datacube as a CF-decoded dataset.
+
+    Deliberately plain xarray, with no dependency on the package that wrote the
+    store. Analysis-ready cubes keep their variables as scaled integers
+    (``scale_factor`` / ``add_offset`` / ``_FillValue``), and that encoding is
+    CF-standard — xarray's own decoder restores the physical values, verified
+    bit-for-bit against the writer's reader. The contract between the two
+    packages is therefore the *file format*, not a shared Python API.
+
+    Two details matter:
+
+    * ``decode_coords="all"`` promotes the ``spatial_ref`` grid-mapping variable
+      to a coordinate; without it ``ds.rio.crs`` silently returns ``None`` and
+      every downstream reprojection is wrong.
+    * Decoded scaled integers widen to float64, doubling memory for values that
+      carry at most ~4.5 significant digits, so floating variables are cast back
+      to float32.
+
+    Parameters
+    ----------
+    path : Path
+        Path to the ``.zarr`` store.
+    chunks : str | dict | None
+        Dask chunking; ``None`` for an un-chunked open.
+
+    Returns
+    -------
+    xr.Dataset
+    """
+    import numpy as np
+
+    logger.debug("Opening Zarr (chunks=%r): %s", chunks, path)
+    try:
+        ds = xr.open_zarr(
+            str(path), consolidated=True, chunks=chunks, decode_coords="all"
+        )
+    except (KeyError, ValueError, FileNotFoundError):
+        # Stores written without consolidated metadata are still perfectly
+        # readable; it is only an index for faster opening.
+        logger.debug("No consolidated metadata in %s — reading group metadata", path)
+        ds = xr.open_zarr(
+            str(path), consolidated=False, chunks=chunks, decode_coords="all"
+        )
+
+    for name, var in ds.data_vars.items():
+        if np.issubdtype(var.dtype, np.floating) and var.dtype != np.float32:
+            ds[name] = var.astype("float32")
+    return ds
 
 
 # ---------------------------------------------------------------------------

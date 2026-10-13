@@ -16,7 +16,7 @@ build-backend = "setuptools.build_meta"
 # ---------------------------------------------------------------------------
 [project]
 name        = "ag-cube-cm"
-version     = "0.3.0"
+version     = "0.3.1"
 description = "Spatial process-based crop model orchestration (DSSAT, CAF2021, SIMPLE, Banana-N). Consumes datacubes produced by the aggeodata package."
 readme      = "README.md"
 license     = {text = "MIT"}
@@ -88,6 +88,14 @@ models = [
     "bayesian-optimization>=2.0.0",
 ]
 
+# End-to-end data acquisition (mode: full_pipeline).
+# The core package reads datacubes by file format — CF-compliant NetCDF or
+# Zarr — and never imports aggeodata. Only ag_cube_cm.pipeline does, so this
+# extra is needed solely to download data and build the cubes in one command.
+pipeline = [
+    "aggeodata @ git+https://github.com/CGIAR-Climate-Data-Hub/aggeodata.git",
+]
+
 # Visualisation
 viz = [
     "matplotlib>=3.9.0",
@@ -119,7 +127,7 @@ mcp = [
 
 # Convenience meta-extra: everything
 all = [
-    "ag-cube-cm[models,viz,dev,docs,mcp]",
+    "ag-cube-cm[models,pipeline,viz,dev,docs,mcp]",
 ]
 
 
