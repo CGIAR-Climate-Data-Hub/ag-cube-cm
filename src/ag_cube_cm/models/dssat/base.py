@@ -748,6 +748,13 @@ class DSSATModel(CropModel):
                 capture_output=True,
                 text=True,
                 env=run_env,
+                # DSSAT prompts "Please press < ENTER > key to continue" on some
+                # errors. Without an explicit stdin the child inherits the
+                # parent's — which, when this runs inside an MCP stdio server, is
+                # the JSON-RPC pipe. DSSAT then blocks forever on a read that will
+                # never be answered, and can consume protocol bytes while doing
+                # it. DEVNULL turns that prompt into an immediate EOF.
+                stdin=subprocess.DEVNULL,
             )
             logger.debug("[Pixel %s] DSSAT stdout: %s", self.pixel_id, result.stdout[-500:])
             summary = self.working_dir / "Summary.OUT"
