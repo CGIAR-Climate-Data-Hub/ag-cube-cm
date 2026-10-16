@@ -353,7 +353,12 @@ class SpatialCM:
             for x in weather_ds.x.values
         ]
         if max_pixels is not None:
-            pixels = pixels[:max_pixels]
+            # Callers that arrive through a JSON or protobuf boundary hand over
+            # 1.0 rather than 1 — Gemini's Struct has only one number type, and
+            # it is a double. A float is not a valid slice index, so without this
+            # the run dies here with "slice indices must be integers", after the
+            # weather and soil cubes have already been built.
+            pixels = pixels[:int(max_pixels)]
 
         jobs: list[tuple] = []
         for idx, (py, px) in enumerate(pixels):
