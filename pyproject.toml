@@ -16,7 +16,7 @@ build-backend = "setuptools.build_meta"
 # ---------------------------------------------------------------------------
 [project]
 name        = "ag-cube-cm"
-version     = "0.3.3"
+version     = "0.3.4"
 description = "Spatial process-based crop model orchestration (DSSAT, CAF2021, SIMPLE, Banana-N). Consumes datacubes produced by the aggeodata package."
 readme      = "README.md"
 license     = {text = "MIT"}

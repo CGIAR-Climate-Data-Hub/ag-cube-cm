@@ -339,6 +339,76 @@ class SpatialCM:
             return all_years
         return sim_years
 
+    def _representative_pixels(
+        self, weather_ds: xr.Dataset, max_pixels: int,
+    ) -> list[tuple[float, float]]:
+        """Pick *max_pixels* cells spread over the region, skipping empty ones.
+
+        Taking the first N cells of the flattened grid looks reasonable and is
+        badly wrong: row-major order starts in a corner of the bounding box, and
+        a department is not a rectangle. On Tolima a 6-pixel cap landed entirely
+        in the north-west corner, outside the department, so every simulation was
+        skipped and the map drew a thin strip nowhere near the area asked about.
+
+        So sample on a coarse lattice across the whole extent, and consider only
+        cells that actually carry weather. A capped run is a sample of the
+        region, and a sample should look like the region.
+        """
+        ys, xs = weather_ds.y.values, weather_ds.x.values
+        ny, nx = len(ys), len(xs)
+
+        # Cells with weather. A handful of days is enough to tell a land cell
+        # from a masked one, and avoids reading the whole cube.
+        valid = None
+        for name, da in weather_ds.data_vars.items():
+            if {"y", "x"}.issubset(da.dims) and da.ndim >= 2:
+                probe = da.isel({d: slice(0, 5) for d in da.dims
+                                 if d not in ("y", "x")})
+                dims = [d for d in probe.dims if d not in ("y", "x")]
+                valid = np.isfinite(probe).any(dim=dims) if dims else np.isfinite(probe)
+                valid = np.asarray(valid.transpose("y", "x").values, dtype=bool)
+                break
+        if valid is None or not valid.any():
+            valid = np.ones((ny, nx), dtype=bool)
+
+        # A lattice with the grid's aspect ratio, so the sample covers the extent
+        # evenly instead of favouring one axis.
+        total = max(int(valid.sum()), 1)
+        if max_pixels >= total:
+            return [(float(ys[i]), float(xs[j]))
+                    for i in range(ny) for j in range(nx) if valid[i, j]]
+
+        frac = (max_pixels / float(ny * nx)) ** 0.5
+        picked: list[tuple[float, float]] = []
+        seen: set[tuple[int, int]] = set()
+        # Widen the lattice until enough valid cells are found; a sparse region
+        # needs more candidates than a dense one to yield the same sample size.
+        for scale in (1.0, 1.5, 2.2, 3.5, 6.0):
+            n_y = min(ny, max(1, int(round(ny * frac * scale))))
+            n_x = min(nx, max(1, int(round(nx * frac * scale))))
+            yi = np.unique(np.linspace(0, ny - 1, n_y).round().astype(int))
+            xi = np.unique(np.linspace(0, nx - 1, n_x).round().astype(int))
+            for i in yi:
+                for j in xi:
+                    if valid[i, j] and (i, j) not in seen:
+                        seen.add((i, j))
+                        picked.append((float(ys[i]), float(xs[j])))
+            if len(picked) >= max_pixels:
+                break
+        if len(picked) < max_pixels:      # fall back to any valid cell
+            for i in range(ny):
+                for j in range(nx):
+                    if valid[i, j] and (i, j) not in seen:
+                        seen.add((i, j))
+                        picked.append((float(ys[i]), float(xs[j])))
+                        if len(picked) >= max_pixels:
+                            break
+                if len(picked) >= max_pixels:
+                    break
+        logger.info("Sampling %d of %d cells with weather, spread over the extent",
+                    min(len(picked), max_pixels), total)
+        return picked[:max_pixels]
+
     def _build_jobs(
         self,
         weather_ds: xr.Dataset,
@@ -347,18 +417,14 @@ class SpatialCM:
         max_pixels: int | None,
     ) -> list[tuple]:
         """Expand the grid into one job per pixel x window x season."""
-        pixels = [
-            (float(y), float(x))
-            for y in weather_ds.y.values
-            for x in weather_ds.x.values
-        ]
-        if max_pixels is not None:
-            # Callers that arrive through a JSON or protobuf boundary hand over
-            # 1.0 rather than 1 — Gemini's Struct has only one number type, and
-            # it is a double. A float is not a valid slice index, so without this
-            # the run dies here with "slice indices must be integers", after the
-            # weather and soil cubes have already been built.
-            pixels = pixels[:int(max_pixels)]
+        ys, xs = weather_ds.y.values, weather_ds.x.values
+        if max_pixels is None:
+            pixels = [(float(y), float(x)) for y in ys for x in xs]
+        else:
+            # Callers arriving through a JSON or protobuf boundary hand over 1.0
+            # rather than 1 — Gemini's Struct has one number type and it is a
+            # double — and a float is not a valid slice index.
+            pixels = self._representative_pixels(weather_ds, int(max_pixels))
 
         jobs: list[tuple] = []
         for idx, (py, px) in enumerate(pixels):
