@@ -141,6 +141,10 @@ class SpatialCM:
     >>> cm.close()
     """
 
+    #: Capped runs sample a regular stride (see _representative_pixels); the
+    #: Space checks this flag before patching in its own copy.
+    _REGULAR_SAMPLING = True
+
     def __init__(self, config: SimulationConfig) -> None:
         self.config = config
         self.ncores: int = getattr(config.GENERAL_INFO, "ncores", 4) or 4
@@ -371,13 +375,37 @@ class SpatialCM:
         if valid is None or not valid.any():
             valid = np.ones((ny, nx), dtype=bool)
 
-        # A lattice with the grid's aspect ratio, so the sample covers the extent
-        # evenly instead of favouring one axis.
         total = max(int(valid.sum()), 1)
         if max_pixels >= total:
             return [(float(ys[i]), float(xs[j]))
                     for i in range(ny) for j in range(nx) if valid[i, j]]
 
+        # A regular stride: every sy-th row and sx-th column, the pair that keeps
+        # the most valid cells within the cap. The sample is then a coarser
+        # REGULAR grid, so the output raster has no holes. The earlier lattice
+        # (linspace rounding, widened in passes) picked uneven rows and columns;
+        # written back onto the union of their coordinates it left an empty
+        # column every third or fourth one, which a map shows as stripes.
+        best = None
+        for s in range(1, max(ny, nx) + 1):
+            for sy, sx in ((s, s), (s, s + 1), (s + 1, s)):
+                oy, ox = ((ny - 1) % sy) // 2, ((nx - 1) % sx) // 2
+                n = int(valid[oy::sy, ox::sx].sum())
+                if 0 < n <= max_pixels and (best is None or n > best[0]):
+                    best = (n, sy, sx, oy, ox)
+            if best is not None and int(valid[::s, ::s].sum()) * 2 < best[0]:
+                break                       # strides only get coarser from here
+        if best is not None:
+            _, sy, sx, oy, ox = best
+            picked = [(float(ys[i]), float(xs[j]))
+                      for i in range(oy, ny, sy) for j in range(ox, nx, sx)
+                      if valid[i, j]]
+            logger.info("Sampling %d of %d cells with weather: every %d row(s) "
+                        "and %d column(s)", len(picked), total, sy, sx)
+            return picked
+
+        # Only reached when the cap is below what any stride can deliver
+        # (a handful of pixels on a big grid): fall back to a spread lattice.
         frac = (max_pixels / float(ny * nx)) ** 0.5
         picked: list[tuple[float, float]] = []
         seen: set[tuple[int, int]] = set()
