@@ -53,6 +53,7 @@ _SEASON_SPAN_DAYS = 200
 #: Wider span used when slicing a pixel's weather to one season, so a late
 #: maturing cultivar still has weather past its harvest date.
 _SEASON_SLICE_DAYS = 250
+_SEASON_SLICE_FIXED = True
 
 
 # ---------------------------------------------------------------------------
@@ -524,7 +525,14 @@ class SpatialCM:
             mgmt = self.config.MANAGEMENT.model_copy(
                 update={"planting_date": pdate_yr}
             )
-            cfg_job = self.config.model_copy(update={"MANAGEMENT": mgmt})
+            update = {"MANAGEMENT": mgmt}
+            # One job is one season. Left unset, DSSAT derives NYERS from the
+            # weather span and averages extra seasons into this year's value.
+            if getattr(self.config.GENERAL_INFO, "number_years", None) is None:
+                update["GENERAL_INFO"] = self.config.GENERAL_INFO.model_copy(
+                    update={"number_years": 1}
+                )
+            cfg_job = self.config.model_copy(update=update)
 
             model = model_factory(cfg_job)
             model.setup_working_directory(f"px{pixel_idx}_w{w_idx:02d}_y{yr}")
@@ -644,8 +652,11 @@ def _slice_season(
     try:
         times = pd.DatetimeIndex([pd.Timestamp(t) for t in ds[time_dim].values])
         harvest_yr = (pdate + timedelta(days=_SEASON_SLICE_DAYS)).year
-        mask = times.year.isin(range(year, harvest_yr + 1))
-        return ds.isel({time_dim: mask.values})
+        # isin on DatetimeIndex.year returns a plain ndarray; calling .values on
+        # it raised, the except below swallowed it, and every job got the whole
+        # series -- DSSAT then ran one season per remaining weather year.
+        mask = np.asarray(times.year.isin(range(year, harvest_yr + 1)))
+        return ds.isel({time_dim: mask})
     except Exception:  # noqa: BLE001 — an unsliceable axis is not fatal
         return ds
 
