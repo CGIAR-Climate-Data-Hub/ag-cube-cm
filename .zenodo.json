@@ -1,0 +1,67 @@
+{
+  "title": "ag-cube-cm: spatial process-based crop model orchestration on climate and soil datacubes",
+  "upload_type": "software",
+  "version": "0.3.6",
+  "description": "<p><strong>ag-cube-cm</strong> is a Python package for running process-based crop models over spatial domains. It reads climate and soil datacubes (CF-compliant NetCDF or Zarr), runs pixel-level simulations in parallel and produces gridded yield maps (grain yield, kg/ha) across planting windows, years and space.</p><p>Supported crop models:</p><ul><li><strong>DSSAT</strong>: maize, wheat, rice, soybean and other crops (bundled binary for Linux and Windows).</li><li><strong>CAF2021</strong>: agroforestry model for coffee under shade trees.</li><li><strong>SIMPLE</strong>: generic single-crop model.</li><li><strong>Banana-N</strong>: banana growth and nitrogen dynamics.</li></ul><p>ag-cube-cm is the crop-modelling layer of a two-package workflow with <a href=\"https://github.com/CGIAR-Climate-Data-Hub/aggeodata\">aggeodata</a>, which downloads CHIRPS, CHIRTS, AgERA5, NASA POWER and SoilGrids data and builds the input datacubes. Simulations are configured with a validated YAML file and can be run from the command line, from Python or through an MCP server for AI agents.</p><p>The package powers the <a href=\"https://cgiar-climate-data-hub.github.io/skills/skills/spatial-crop-modeler/\">spatial-crop-modeler</a> AI agent skill of the CGIAR Climate Data Hub, developed in collaboration with AgWise (CGIAR Sustainable Farming Program) to make spatial crop modelling possible from simple prompts.</p>",
+  "creators": [
+    {
+      "name": "Aguilar-Ariza, Andrés",
+      "affiliation": "Alliance of Bioversity International and CIAT",
+      "orcid": "0000-0001-8179-9931"
+    },
+    {
+      "name":"Ahmed, Jemal Seid",
+      "affiliation": "Alliance of Bioversity International and CIAT",
+      "orcid": "0000-0001-6136-9184"
+    } 
+  ],
+  "contributors": [
+    {
+      "name": "Garzón, David",
+      "affiliation": "Alliance of Bioversity International and CIAT",
+      "type": "Other"
+    },
+    {
+      "name": "Rivera, Ovidio",
+      "affiliation": "Alliance of Bioversity International and CIAT",
+      "type": "Other"
+    }
+  ],
+  "license": "MIT",
+  "access_right": "open",
+  "keywords": [
+    "crop modeling",
+    "DSSAT",
+    "CAF2021",
+    "SIMPLE",
+    "yield potential",
+    "spatial analysis",
+    "datacube",
+    "xarray",
+    "AI agents",
+    "AgWise",
+    "CGIAR",
+    "Climate Data Hub"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/CGIAR-Climate-Data-Hub/ag-cube-cm",
+      "relation": "isSupplementTo",
+      "resource_type": "software",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://cgiar-climate-data-hub.github.io/skills/skills/spatial-crop-modeler/",
+      "relation": "isRequiredBy",
+      "resource_type": "software",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://cgiar-sustainable-farming.github.io/ai/",
+      "relation": "isReferencedBy",
+      "resource_type": "other",
+      "scheme": "url"
+    }
+  ],
+  "language": "eng"
+}
