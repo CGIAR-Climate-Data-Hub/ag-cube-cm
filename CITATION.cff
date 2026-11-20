@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "ag-cube-cm: spatial process-based crop model orchestration on climate and soil datacubes"
+version: 0.3.7
+date-released: 2026-11-20
+abstract: >-
+  ag-cube-cm is a Python package for running process-based crop models
+  (DSSAT, CAF2021, SIMPLE, Banana-N) pixel by pixel over climate and soil
+  datacubes, producing gridded yield maps. It is the crop-modelling layer of a
+  two-package workflow with aggeodata and powers the CGIAR Climate Data Hub
+  spatial-crop-modeler AI agent skill, developed in collaboration with AgWise
+  (CGIAR Sustainable Farming Program).
+authors:
+  - family-names: "Aguilar-Ariza"
+    given-names: "Andrés"
+    orcid: "https://orcid.org/0000-0001-8179-9931"
+    affiliation: "Alliance of Bioversity International and CIAT"
+  - family-names: "Ahmed"
+    given-names: "Jemal Seid"
+    orcid: "https://orcid.org/0000-0001-6136-9184"
+    affiliation: "Alliance of Bioversity International and CIAT"
+repository-code: "https://github.com/CGIAR-Climate-Data-Hub/ag-cube-cm"
+url: "https://cgiar-climate-data-hub.github.io/skills/skills/spatial-crop-modeler/"
+license: MIT
+keywords:
+  - crop modeling
+  - DSSAT
+  - CAF2021
+  - SIMPLE
+  - yield potential
+  - spatial analysis
+  - datacube
+  - AI agents
+  - AgWise
+  - CGIAR
+  - Climate Data Hub
